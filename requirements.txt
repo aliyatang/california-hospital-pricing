@@ -1,0 +1,12 @@
+pandas
+numpy
+requests
+pyarrow
+pyspark
+google-cloud-bigquery
+google-cloud-bigquery-storage
+db-dtypes
+python-dotenv
+PyYAML
+jupyter
+pytest
