@@ -1,0 +1,40 @@
+# Virtual environment
+.venv/
+venv/
+
+# Environment variables / secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Raw and generated data
+data/raw/*
+data/interim/*
+data/processed/*
+
+# Keep empty directory placeholders
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+
+# Spark
+.sparkStaging/
+metastore_db/
+derby.log
+
+# Tableau exports
+*.hyper
+*.twb
+*.twbx
