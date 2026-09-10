@@ -1,0 +1,5 @@
+cms:
+  hospital_general_information:
+    dataset_id: "xubh-q36u"
+    api_url: "https://data.cms.gov/provider-data/api/1/datastore/query/xubh-q36u/0"
+    source_page: "https://data.cms.gov/provider-data/dataset/xubh-q36u"
