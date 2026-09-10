@@ -9,3 +9,17 @@ hcai:
     source_page: "https://lab.data.ca.gov/dataset/facility-profile-attributes"
     api_url: "https://data.chhs.ca.gov/api/3/action/datastore_search"
     resource_id: "29afed21-d976-4dc9-9684-7be21e96ded5"
+
+census:
+  acs5_profile_2024:
+    api_url: "https://api.census.gov/data/2024/acs/acs5/profile"
+    source_page: "https://www.census.gov/data/developers/data-sets/acs-5year/2024.html"
+    geography: "zip code tabulation area"
+
+    variables:
+      population: "DP05_0001E"
+      median_household_income: "DP03_0062E"
+      poverty_rate: "DP03_0128PE"
+      uninsured_rate: "DP03_0099PE"
+      unemployment_rate: "DP03_0009PE"
+      bachelors_or_higher_rate: "DP02_0068PE"
