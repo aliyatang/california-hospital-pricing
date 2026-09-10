@@ -1,0 +1,42 @@
+location_name,facility_id,status
+Antioch Medical Center,050760,include
+Fremont Medical Center,050512,include
+Fresno Medical Center,050710,include
+Oakland Medical Center,050075,include
+Redwood City Medical Center,050541,include
+Richmond Medical Center,050075,include
+Roseville Medical Center,050772,include
+Sacramento Medical Center,050425,include
+San Francisco Medical Center,050076,include
+San Jose Medical Center,050604,include
+San Leandro Medical Center,050777,include
+San Rafael Medical Center,050510,include
+Santa Clara Medical Center,050071,include
+Santa Rosa Medical Center,050690,include
+South Sacramento Medical Center,050674,include
+South San Francisco Medical Center,050070,include
+Stockton Medical Center - Manteca,050748,include
+Stockton Medical Center - Modesto,050748,include
+Vacaville Medical Center,050767,include
+Vallejo Medical Center,050073,include
+Walnut Creek Medical Center,050072,include
+Orange County   Anaheim Medical Center,050609,include
+Orange County   Irvine Medical Center,050609,include
+Baldwin Park Medical Center,050723,include
+Downey Medical Center,050139,include
+San Bernardino - Fontana Medical Center,050140,include
+San Bernardino - Ontario Medical Center,050140,include
+Los Angeles Sunset Medical Center,050138,include
+Panorama Medical Center,050137,include
+Riverside Medical Center,050686,include
+Moreno Valley Medical Center,050765,include
+San Diego Clairemont Mesa Medical Center,050515,include
+San Diego Zion Medical Center,050515,include
+San Marcos Medical Center,050855,include
+South Bay Medical Center,050411,include
+West Los Angeles Medical Center,050561,include
+Woodland Hills Medical Center,050677,include
+Sunnyside Medical Center,,exclude_non_ca
+Westside Medical Center,,exclude_non_ca
+Central Medical Center,,exclude_non_ca
+Moanalua Medical Center,,exclude_non_ca
