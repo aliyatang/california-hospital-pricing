@@ -3,3 +3,9 @@ cms:
     dataset_id: "xubh-q36u"
     api_url: "https://data.cms.gov/provider-data/api/1/datastore/query/xubh-q36u/0"
     source_page: "https://data.cms.gov/provider-data/dataset/xubh-q36u"
+
+hcai:
+  facility_profile_attributes:
+    source_page: "https://lab.data.ca.gov/dataset/facility-profile-attributes"
+    api_url: "https://data.chhs.ca.gov/api/3/action/datastore_search"
+    resource_id: "29afed21-d976-4dc9-9684-7be21e96ded5"

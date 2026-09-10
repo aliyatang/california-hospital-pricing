@@ -1,0 +1,10 @@
+cms_id,hcai_id,reason
+050056,106190034,Verified alias and identical address
+050115,106370755,Verified historical HCAI facility and identical address
+050152,106380960,Verified renamed facility and identical address
+050239,106190323,Verified former name and identical address
+050726,106504038,Verified exact facility and address
+050747,106301258,Verified facility rename through HCAI history
+050785,106190681,Verified exact facility and address; HCAI status not Open
+051337,106350784,Verified exact facility and address; CMS ZIP differs
+051306,106110889,Verified exact facility and address
