@@ -10,3 +10,5 @@ python-dotenv
 PyYAML
 jupyter
 pytest
+rapidfuzz
+ijson
