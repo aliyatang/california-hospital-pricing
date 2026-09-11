@@ -17,27 +17,8 @@ MANIFEST_PATH = (
 TEST_LOCATION = "Antioch Medical Center"
 
 
-def format_bytes(num_bytes):
-    """Convert bytes to a readable file size."""
-
-    if num_bytes is None:
-        return "Unknown"
-
-    size = float(num_bytes)
-
-    for unit in ["B", "KB", "MB", "GB"]:
-        if size < 1000:
-            return f"{size:.2f} {unit}"
-
-        size /= 1000
-
-    return f"{size:.2f} TB"
-
-
 def inspect_mrf(url):
-    """
-    Inspect an MRF without downloading the entire file.
-    """
+    """Inspect metadata, pricing schema, and first data row."""
 
     print("\nOpening streamed connection...")
 
@@ -49,77 +30,100 @@ def inspect_mrf(url):
 
         response.raise_for_status()
 
+        # Handles the UTF-8 BOM correctly.
+        response.encoding = "utf-8-sig"
+
         print("\n=== HTTP INFO ===")
         print("Status:", response.status_code)
         print(
             "Content-Type:",
             response.headers.get("Content-Type"),
         )
-
-        content_length = response.headers.get(
-            "Content-Length"
-        )
-
-        if content_length:
-            content_length = int(content_length)
-
         print(
-            "File size:",
-            format_bytes(content_length),
+            "Content-Length:",
+            response.headers.get("Content-Length"),
         )
-
         print(
             "Accept-Ranges:",
             response.headers.get("Accept-Ranges"),
         )
-
-        print("\n=== FIRST LINES ===")
 
         lines = []
 
         for line in response.iter_lines(
             decode_unicode=True,
         ):
-
-            if not line:
+            if line is None:
                 continue
 
             lines.append(line)
 
-            print(
-                f"\nLine {len(lines)} "
-                f"({len(line):,} characters)"
-            )
-
-            # Avoid flooding the terminal if a line is enormous.
-            print(line[:2000])
-
-            if len(line) >= 2000:
-                print("\n... [line truncated]")
-
-            if len(lines) == 3:
+            # Need rows 1–4:
+            # metadata header
+            # metadata values
+            # pricing header
+            # first pricing record
+            if len(lines) == 4:
                 break
 
-        if not lines:
-            raise RuntimeError(
-                "MRF returned no readable lines."
-            )
-
-        # Interpret first row as CSV header.
-        header = next(
-            csv.reader([lines[0]])
+    if len(lines) < 4:
+        raise RuntimeError(
+            "Expected at least four rows in CSV MRF."
         )
 
-        print("\n=== CSV HEADER ===")
-        print("Number of columns:", len(header))
+    metadata_header = next(
+        csv.reader([lines[0]])
+    )
 
-        print("\nColumn names:")
+    metadata_values = next(
+        csv.reader([lines[1]])
+    )
 
-        for i, column in enumerate(
-            header,
-            start=1,
-        ):
-            print(f"{i:>3}. {column}")
+    pricing_header = next(
+        csv.reader([lines[2]])
+    )
+
+    first_record = next(
+        csv.reader([lines[3]])
+    )
+
+    print("\n=== FILE METADATA ===")
+
+    for key, value in zip(
+        metadata_header,
+        metadata_values,
+    ):
+        if key:
+            print(f"{key}: {value}")
+
+    print("\n=== PRICING TABLE ===")
+    print(
+        "Pricing columns:",
+        len(pricing_header),
+    )
+
+    print(
+        "First data-row fields:",
+        len(first_record),
+    )
+
+    print("\nPricing column names:")
+
+    for i, column in enumerate(
+        pricing_header,
+        start=1,
+    ):
+        print(f"{i:>3}. {column}")
+
+    print("\n=== FIRST PRICING RECORD ===")
+
+    for column, value in zip(
+        pricing_header,
+        first_record,
+    ):
+        print(
+            f"{column}: {value[:150]}"
+        )
 
 
 def main():
@@ -135,8 +139,7 @@ def main():
 
     if row.empty:
         raise ValueError(
-            f"Could not find {TEST_LOCATION} "
-            "in the Kaiser manifest."
+            f"{TEST_LOCATION} not found."
         )
 
     row = row.iloc[0]
@@ -145,7 +148,6 @@ def main():
     print("-----------------------")
     print("Location:", row["location_name"])
     print("CMS facility ID:", row["facility_id"])
-    print("URL:", row["mrf_url"])
 
     inspect_mrf(
         row["mrf_url"]
