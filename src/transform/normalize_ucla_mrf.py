@@ -1,7 +1,10 @@
 from pathlib import Path
 from collections import Counter
 from decimal import Decimal
+import argparse
+import csv
 import json
+import re
 
 import ijson
 import pyarrow as pa
@@ -10,26 +13,28 @@ import pyarrow.parquet as pq
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-INPUT_PATH = (
+CROSSWALK_PATH = (
+    PROJECT_ROOT
+    / "config"
+    / "ucla_mrf_crosswalk.csv"
+)
+
+RAW_DIR = (
     PROJECT_ROOT
     / "data"
     / "raw"
     / "mrf"
     / "ucla"
-    / "ronald_reagan_ucla.json"
 )
 
-OUTPUT_PATH = (
+OUTPUT_DIR = (
     PROJECT_ROOT
     / "data"
     / "interim"
     / "mrf"
     / "normalized"
     / "ucla"
-    / "050262_ronald_reagan_ucla_medical_center.parquet"
 )
-
-FACILITY_ID = "050262"
 
 BATCH_SIZE = 50_000
 
@@ -99,6 +104,18 @@ SCHEMA = pa.schema([
 ])
 
 
+def slugify(value):
+    value = value.lower()
+
+    value = re.sub(
+        r"[^a-z0-9]+",
+        "_",
+        value,
+    )
+
+    return value.strip("_")
+
+
 def to_string(value):
     if value is None:
         return None
@@ -120,6 +137,7 @@ def to_float(value):
 
     try:
         return float(value)
+
     except (
         TypeError,
         ValueError,
@@ -127,14 +145,57 @@ def to_float(value):
         return None
 
 
-def get_single_value(prefix):
-    """
-    Read one small metadata value without loading the
-    standard_charge_information array.
-    """
+def read_crosswalk():
 
     with open(
-        INPUT_PATH,
+        CROSSWALK_PATH,
+        newline="",
+        encoding="utf-8",
+    ) as file:
+
+        return list(
+            csv.DictReader(file)
+        )
+
+
+def get_location_record(
+    location_name,
+):
+
+    records = {
+        row["location_name"]:
+            row
+        for row in read_crosswalk()
+    }
+
+    if location_name not in records:
+
+        raise ValueError(
+            f"Location not found: "
+            f"{location_name}"
+        )
+
+    record = records[
+        location_name
+    ]
+
+    if record["status"] != "include":
+
+        raise ValueError(
+            f"{location_name} is marked "
+            f"{record['status']}."
+        )
+
+    return record
+
+
+def get_single_value(
+    input_path,
+    prefix,
+):
+
+    with open(
+        input_path,
         "rb",
     ) as file:
 
@@ -145,15 +206,19 @@ def get_single_value(prefix):
 
         try:
             return next(items)
+
         except StopIteration:
             return None
 
 
-def get_metadata():
+def get_metadata(
+    input_path,
+):
 
     license_info = (
         get_single_value(
-            "license_information"
+            input_path,
+            "license_information",
         )
         or {}
     )
@@ -162,21 +227,24 @@ def get_metadata():
         "mrf_hospital_name":
             to_string(
                 get_single_value(
-                    "hospital_name"
+                    input_path,
+                    "hospital_name",
                 )
             ),
 
         "mrf_location_name":
             to_string(
                 get_single_value(
-                    "location_name.item"
+                    input_path,
+                    "location_name.item",
                 )
             ),
 
         "mrf_address":
             to_string(
                 get_single_value(
-                    "hospital_address.item"
+                    input_path,
+                    "hospital_address.item",
                 )
             ),
 
@@ -190,28 +258,32 @@ def get_metadata():
         "mrf_type_2_npi":
             to_string(
                 get_single_value(
-                    "type_2_npi.item"
+                    input_path,
+                    "type_2_npi.item",
                 )
             ),
 
         "mrf_last_updated_on":
             to_string(
                 get_single_value(
-                    "last_updated_on"
+                    input_path,
+                    "last_updated_on",
                 )
             ),
 
         "mrf_as_of_date":
             to_string(
                 get_single_value(
-                    "as_of_date"
+                    input_path,
+                    "as_of_date",
                 )
             ),
 
         "mrf_version":
             to_string(
                 get_single_value(
-                    "version"
+                    input_path,
+                    "version",
                 )
             ),
     }
@@ -258,43 +330,97 @@ def write_batch(
     )
 
 
-def main():
+def normalize(
+    location_name,
+    force=False,
+):
 
-    print(
-        "Normalizing Ronald Reagan UCLA MRF...\n"
+    record = get_location_record(
+        location_name
     )
 
-    metadata = get_metadata()
+    facility_id = str(
+        record["facility_id"]
+    ).zfill(6)
+
+    slug = slugify(
+        location_name
+    )
+
+    input_path = (
+        RAW_DIR
+        / f"{facility_id}_{slug}.json"
+    )
+
+    output_path = (
+        OUTPUT_DIR
+        / f"{facility_id}_{slug}.parquet"
+    )
+
+    if not input_path.exists():
+
+        raise FileNotFoundError(
+            f"Raw MRF not found:\n"
+            f"{input_path}"
+        )
+
+    OUTPUT_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    if (
+        output_path.exists()
+        and not force
+    ):
+
+        print(
+            "Already normalized:"
+        )
+
+        print(
+            output_path
+        )
+
+        return output_path
+
+    if output_path.exists():
+        output_path.unlink()
 
     print(
-        "Hospital:",
+        f"Normalizing {location_name}..."
+    )
+
+    print(
+        "CMS facility ID:",
+        facility_id,
+    )
+
+    print(
+        "Input:",
+        input_path,
+    )
+
+    metadata = get_metadata(
+        input_path
+    )
+
+    print(
+        "MRF hospital:",
         metadata[
             "mrf_hospital_name"
         ],
     )
 
     print(
-        "Location:",
+        "MRF location:",
         metadata[
             "mrf_location_name"
         ],
     )
 
-    print(
-        "CMS facility ID:",
-        FACILITY_ID,
-    )
-
-    OUTPUT_PATH.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    if OUTPUT_PATH.exists():
-        OUTPUT_PATH.unlink()
-
     writer = pq.ParquetWriter(
-        OUTPUT_PATH,
+        output_path,
         SCHEMA,
         compression="snappy",
     )
@@ -311,7 +437,7 @@ def main():
     try:
 
         with open(
-            INPUT_PATH,
+            input_path,
             "rb",
         ) as file:
 
@@ -320,7 +446,10 @@ def main():
                 "standard_charge_information.item",
             )
 
-            for service_number, service in enumerate(
+            for (
+                service_number,
+                service,
+            ) in enumerate(
                 services,
                 start=1,
             ):
@@ -333,14 +462,14 @@ def main():
                     )
                 )
 
-                # ---------------------------------
-                # Preserve complete code array
-                # ---------------------------------
+                # -------------------------
+                # Codes
+                # -------------------------
 
                 codes = (
                     service.get(
                         "code_information",
-                        []
+                        [],
                     )
                     or []
                 )
@@ -370,9 +499,9 @@ def main():
                     else None
                 )
 
-                # ---------------------------------
+                # -------------------------
                 # Drug information
-                # ---------------------------------
+                # -------------------------
 
                 drug = (
                     service.get(
@@ -389,19 +518,22 @@ def main():
                     drug.get("type")
                 )
 
-                # ---------------------------------
+                # -------------------------
                 # Charge objects
-                # ---------------------------------
+                # -------------------------
 
                 charges = (
                     service.get(
                         "standard_charges",
-                        []
+                        [],
                     )
                     or []
                 )
 
-                for charge_number, charge in enumerate(
+                for (
+                    charge_number,
+                    charge,
+                ) in enumerate(
                     charges,
                     start=1,
                 ):
@@ -411,12 +543,15 @@ def main():
                     payers = (
                         charge.get(
                             "payers_information",
-                            []
+                            [],
                         )
                         or []
                     )
 
-                    for payer_number, payer in enumerate(
+                    for (
+                        payer_number,
+                        payer,
+                    ) in enumerate(
                         payers,
                         start=1,
                     ):
@@ -483,12 +618,12 @@ def main():
                         if not has_price:
                             no_price_count += 1
 
-                        record = {
+                        row = {
                             "system_name":
                                 "UCLA Health",
 
                             "facility_id":
-                                FACILITY_ID,
+                                facility_id,
 
                             **metadata,
 
@@ -542,8 +677,8 @@ def main():
                             "all_codes_json":
                                 all_codes_json,
 
-                            # Modifier information is a
-                            # separate UCLA reference table.
+                            # UCLA modifier data
+                            # remains separate.
                             "modifier":
                                 None,
 
@@ -642,7 +777,6 @@ def main():
                                     )
                                 ),
 
-                            # Keep count as STRING.
                             "negotiated_count":
                                 to_string(
                                     payer.get(
@@ -681,7 +815,7 @@ def main():
                         }
 
                         batch.append(
-                            record
+                            row
                         )
 
                         if (
@@ -723,6 +857,11 @@ def main():
     )
 
     print(
+        "Location:",
+        location_name,
+    )
+
+    print(
         "Services:",
         f"{service_count:,}",
     )
@@ -746,10 +885,10 @@ def main():
         "\n=== PRICE REPRESENTATIONS ==="
     )
 
-    for representation, count in (
-        representations
-        .most_common()
-    ):
+    for (
+        representation,
+        count,
+    ) in representations.most_common():
 
         print(
             representation,
@@ -758,15 +897,39 @@ def main():
 
     print(
         "\nOutput size:",
-        f"{OUTPUT_PATH.stat().st_size / (1024 ** 2):.2f} MB",
+        f"{output_path.stat().st_size / (1024 ** 2):.2f} MB",
     )
 
     print(
-        "\nSaved:"
+        "Saved:"
     )
 
     print(
-        OUTPUT_PATH
+        output_path
+    )
+
+    return output_path
+
+
+def main():
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--location",
+        required=True,
+    )
+
+    parser.add_argument(
+        "--force",
+        action="store_true",
+    )
+
+    args = parser.parse_args()
+
+    normalize(
+        args.location,
+        force=args.force,
     )
 
 
