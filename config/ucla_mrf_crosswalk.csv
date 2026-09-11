@@ -1,0 +1,5 @@
+location_name,facility_id,status
+Ronald Reagan UCLA Medical Center,050262,include
+UCLA Santa Monica Medical Center,050112,include
+UCLA West Valley Medical Center,050481,include
+Resnick Neuropsychiatric Hospital at UCLA,054009,exclude_ineligible
