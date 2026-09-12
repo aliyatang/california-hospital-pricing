@@ -1,0 +1,4 @@
+mrf_location_name,facility_id,source_file,include_in_analysis,match_method
+"Sutter Medical Center, Sacramento",050108,sutter_medical_center_sacramento.csv,true,exact_name_address
+"Sutter Roseville Medical Center",050309,sutter_roseville_medical_center.csv,true,exact_name
+"Sutter Santa Rosa Regional Hospital",050291,sutter_santa_rosa_regional_hospital.csv,true,exact_name
