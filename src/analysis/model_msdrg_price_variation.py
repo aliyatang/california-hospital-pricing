@@ -1,6 +1,7 @@
 from google.cloud import bigquery
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
@@ -12,6 +13,7 @@ from sklearn.model_selection import GroupKFold, cross_val_predict
 
 
 PROJECT_ID = "california-hospital-pricing"
+
 
 QUERY = """
 SELECT
@@ -29,28 +31,105 @@ WHERE
 """
 
 
-def load_data():
-    client = bigquery.Client(project=PROJECT_ID)
-    df = client.query(QUERY).to_dataframe()
+def validate_predictions(predictions, model_name):
+    """Fail immediately if a model produces invalid predictions."""
 
-    print(f"Rows loaded: {len(df):,}")
-    print(f"Unique MS-DRGs: {df['msdrg_code'].nunique():,}")
-    print()
-    print(df["payer_category"].value_counts())
-    print()
-    print(df["payer_family"].value_counts())
+    if not np.isfinite(predictions).all():
+        invalid_count = np.sum(~np.isfinite(predictions))
+
+        raise ValueError(
+            f"{model_name} produced "
+            f"{invalid_count} non-finite predictions."
+        )
+
+
+def load_data():
+    client = bigquery.Client(
+        project=PROJECT_ID
+    )
+
+    df = client.query(
+        QUERY
+    ).to_dataframe()
+
+    # Explicit numeric conversion for modeling.
+    numeric_columns = [
+        "ucla_price",
+        "sutter_price",
+        "ucla_vs_sutter_ratio",
+        "log_price_ratio",
+    ]
+
+    for column in numeric_columns:
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce",
+        )
+
+    df = df.dropna(
+        subset=[
+            "msdrg_code",
+            "payer_family",
+            "payer_category",
+            "log_price_ratio",
+        ]
+    ).copy()
+
+    print(
+        f"Rows loaded: {len(df):,}"
+    )
+
+    print(
+        f"Unique MS-DRGs: "
+        f"{df['msdrg_code'].nunique():,}"
+    )
+
+    print(
+        "\npayer_category"
+    )
+
+    print(
+        df["payer_category"]
+        .value_counts()
+    )
+
+    print(
+        "\npayer_family"
+    )
+
+    print(
+        df["payer_family"]
+        .value_counts()
+    )
 
     return df
 
 
-def run_linear_model(df):
+def run_ridge_model(df):
+    """
+    Basic additive Ridge model.
+
+    log price ratio
+        ~ payer family
+        + payer category
+    """
+
     features = [
         "payer_family",
         "payer_category",
     ]
 
     X = df[features]
-    y = df["log_price_ratio"]
+
+    y = (
+        df["log_price_ratio"]
+        .astype(np.float64)
+        .to_numpy()
+    )
+
+    groups = df[
+        "msdrg_code"
+    ]
 
     preprocessing = ColumnTransformer(
         transformers=[
@@ -60,6 +139,7 @@ def run_linear_model(df):
                     handle_unknown="ignore",
                     drop="first",
                     sparse_output=False,
+                    dtype=np.float64,
                 ),
                 features,
             )
@@ -68,15 +148,22 @@ def run_linear_model(df):
 
     model = Pipeline(
         steps=[
-            ("preprocessing", preprocessing),
-            ("model", Ridge(alpha=1.0)),
+            (
+                "preprocessing",
+                preprocessing,
+            ),
+            (
+                "model",
+                Ridge(
+                    alpha=1.0
+                ),
+            ),
         ]
     )
 
-    # Keep the same DRG entirely within one fold.
-    groups = df["msdrg_code"]
-
-    cv = GroupKFold(n_splits=5)
+    cv = GroupKFold(
+        n_splits=5
+    )
 
     predictions = cross_val_predict(
         model,
@@ -86,22 +173,57 @@ def run_linear_model(df):
         groups=groups,
     )
 
-    r2 = r2_score(y, predictions)
-    mae = mean_absolute_error(y, predictions)
+    validate_predictions(
+        predictions,
+        "Basic Ridge",
+    )
 
-    print("\nRidge regression")
-    print("-----------------")
-    print(f"Grouped CV R²:  {r2:.4f}")
-    print(f"Grouped CV MAE: {mae:.4f}")
+    r2 = r2_score(
+        y,
+        predictions,
+    )
 
-    model.fit(X, y)
+    mae = mean_absolute_error(
+        y,
+        predictions,
+    )
+
+    print(
+        "\nRidge regression"
+    )
+
+    print(
+        "-----------------"
+    )
+
+    print(
+        f"Grouped CV R²:  {r2:.4f}"
+    )
+
+    print(
+        f"Grouped CV MAE: {mae:.4f}"
+    )
+
+    model.fit(
+        X,
+        y,
+    )
 
     feature_names = (
-        model.named_steps["preprocessing"]
+        model
+        .named_steps[
+            "preprocessing"
+        ]
         .get_feature_names_out()
     )
 
-    coefficients = model.named_steps["model"].coef_
+    coefficients = (
+        model
+        .named_steps[
+            "model"
+        ]
+        .coef_
+    )
 
     coef_df = pd.DataFrame(
         {
@@ -110,33 +232,84 @@ def run_linear_model(df):
         }
     )
 
-    coef_df["multiplicative_effect"] = np.exp(
-        coef_df["coefficient"]
+    coef_df[
+        "multiplicative_effect"
+    ] = np.exp(
+        coef_df[
+            "coefficient"
+        ]
     )
 
-    coef_df["pct_effect"] = (
-        coef_df["multiplicative_effect"] - 1
+    coef_df[
+        "pct_effect"
+    ] = (
+        coef_df[
+            "multiplicative_effect"
+        ] - 1
     ) * 100
 
-    print("\nCoefficients")
-    print("------------")
+    print(
+        "\nCoefficients"
+    )
+
+    print(
+        "------------"
+    )
+
     print(
         coef_df
-        .sort_values("coefficient")
-        .to_string(index=False)
+        .sort_values(
+            "coefficient"
+        )
+        .to_string(
+            index=False
+        )
     )
 
     return model
 
 
-def run_random_forest(df):
+def run_interaction_ridge(df):
+    """
+    Ridge model using insurer × payer-category combinations.
+
+    This allows the effect of an insurer to differ between
+    Commercial and Medicare contracts.
+    """
+
+    interaction_df = df.copy()
+
+    interaction_df[
+        "payer_family_category"
+    ] = (
+        interaction_df[
+            "payer_family"
+        ]
+        + "__"
+        + interaction_df[
+            "payer_category"
+        ]
+    )
+
     features = [
-        "payer_family",
-        "payer_category",
+        "payer_family_category"
     ]
 
-    X = df[features]
-    y = df["log_price_ratio"]
+    X = interaction_df[
+        features
+    ]
+
+    y = (
+        interaction_df[
+            "log_price_ratio"
+        ]
+        .astype(np.float64)
+        .to_numpy()
+    )
+
+    groups = interaction_df[
+        "msdrg_code"
+    ]
 
     preprocessing = ColumnTransformer(
         transformers=[
@@ -144,7 +317,9 @@ def run_random_forest(df):
                 "categorical",
                 OneHotEncoder(
                     handle_unknown="ignore",
+                    drop="first",
                     sparse_output=False,
+                    dtype=np.float64,
                 ),
                 features,
             )
@@ -153,7 +328,173 @@ def run_random_forest(df):
 
     model = Pipeline(
         steps=[
-            ("preprocessing", preprocessing),
+            (
+                "preprocessing",
+                preprocessing,
+            ),
+            (
+                "model",
+                Ridge(
+                    alpha=1.0
+                ),
+            ),
+        ]
+    )
+
+    cv = GroupKFold(
+        n_splits=5
+    )
+
+    predictions = cross_val_predict(
+        model,
+        X,
+        y,
+        cv=cv,
+        groups=groups,
+    )
+
+    validate_predictions(
+        predictions,
+        "Interaction Ridge",
+    )
+
+    r2 = r2_score(
+        y,
+        predictions,
+    )
+
+    mae = mean_absolute_error(
+        y,
+        predictions,
+    )
+
+    print(
+        "\nRidge with payer interactions"
+    )
+
+    print(
+        "-----------------------------"
+    )
+
+    print(
+        f"Grouped CV R²:  {r2:.4f}"
+    )
+
+    print(
+        f"Grouped CV MAE: {mae:.4f}"
+    )
+
+    model.fit(
+        X,
+        y,
+    )
+
+    feature_names = (
+        model
+        .named_steps[
+            "preprocessing"
+        ]
+        .get_feature_names_out()
+    )
+
+    coefficients = (
+        model
+        .named_steps[
+            "model"
+        ]
+        .coef_
+    )
+
+    coef_df = pd.DataFrame(
+        {
+            "feature": feature_names,
+            "coefficient": coefficients,
+        }
+    )
+
+    coef_df[
+        "multiplicative_effect"
+    ] = np.exp(
+        coef_df[
+            "coefficient"
+        ]
+    )
+
+    coef_df[
+        "pct_effect"
+    ] = (
+        coef_df[
+            "multiplicative_effect"
+        ] - 1
+    ) * 100
+
+    print(
+        "\nInteraction coefficients"
+    )
+
+    print(
+        "------------------------"
+    )
+
+    print(
+        coef_df
+        .sort_values(
+            "coefficient"
+        )
+        .to_string(
+            index=False
+        )
+    )
+
+    return model
+
+
+def run_random_forest(df):
+    """
+    Nonlinear benchmark model.
+    """
+
+    features = [
+        "payer_family",
+        "payer_category",
+    ]
+
+    X = df[
+        features
+    ]
+
+    y = (
+        df[
+            "log_price_ratio"
+        ]
+        .astype(np.float64)
+        .to_numpy()
+    )
+
+    groups = df[
+        "msdrg_code"
+    ]
+
+    preprocessing = ColumnTransformer(
+        transformers=[
+            (
+                "categorical",
+                OneHotEncoder(
+                    handle_unknown="ignore",
+                    sparse_output=False,
+                    dtype=np.float64,
+                ),
+                features,
+            )
+        ]
+    )
+
+    model = Pipeline(
+        steps=[
+            (
+                "preprocessing",
+                preprocessing,
+            ),
             (
                 "model",
                 RandomForestRegressor(
@@ -167,8 +508,9 @@ def run_random_forest(df):
         ]
     )
 
-    groups = df["msdrg_code"]
-    cv = GroupKFold(n_splits=5)
+    cv = GroupKFold(
+        n_splits=5
+    )
 
     predictions = cross_val_predict(
         model,
@@ -178,24 +520,57 @@ def run_random_forest(df):
         groups=groups,
     )
 
-    r2 = r2_score(y, predictions)
-    mae = mean_absolute_error(y, predictions)
+    validate_predictions(
+        predictions,
+        "Random Forest",
+    )
 
-    print("\nRandom Forest")
-    print("-------------")
-    print(f"Grouped CV R²:  {r2:.4f}")
-    print(f"Grouped CV MAE: {mae:.4f}")
+    r2 = r2_score(
+        y,
+        predictions,
+    )
 
-    model.fit(X, y)
+    mae = mean_absolute_error(
+        y,
+        predictions,
+    )
+
+    print(
+        "\nRandom Forest"
+    )
+
+    print(
+        "-------------"
+    )
+
+    print(
+        f"Grouped CV R²:  {r2:.4f}"
+    )
+
+    print(
+        f"Grouped CV MAE: {mae:.4f}"
+    )
+
+    model.fit(
+        X,
+        y,
+    )
 
     feature_names = (
-        model.named_steps["preprocessing"]
+        model
+        .named_steps[
+            "preprocessing"
+        ]
         .get_feature_names_out()
     )
 
-    importances = model.named_steps[
-        "model"
-    ].feature_importances_
+    importances = (
+        model
+        .named_steps[
+            "model"
+        ]
+        .feature_importances_
+    )
 
     importance_df = pd.DataFrame(
         {
@@ -204,61 +579,134 @@ def run_random_forest(df):
         }
     )
 
-    print("\nFeature importance")
-    print("------------------")
+    print(
+        "\nFeature importance"
+    )
+
+    print(
+        "------------------"
+    )
+
     print(
         importance_df
         .sort_values(
             "importance",
             ascending=False,
         )
-        .to_string(index=False)
+        .to_string(
+            index=False
+        )
     )
 
     return model
 
+
 def evaluate_by_payer_category(df):
-    print("\nPerformance by payer category")
-    print("=============================")
+    """
+    Evaluate insurer-family predictive performance separately
+    for Commercial and Medicare observations.
+    """
 
-    for category in ["Commercial", "Medicare"]:
-        subset = df[df["payer_category"] == category].copy()
+    print(
+        "\nPerformance by payer category"
+    )
 
-        X = subset[["payer_family"]]
-        y = subset["log_price_ratio"]
-        groups = subset["msdrg_code"]
+    print(
+        "============================="
+    )
 
-        n_splits = min(5, groups.nunique())
-        cv = GroupKFold(n_splits=n_splits)
+    for category in [
+        "Commercial",
+        "Medicare",
+    ]:
 
-        # Ridge
-        ridge_preprocessing = ColumnTransformer(
-            transformers=[
-                (
-                    "categorical",
-                    OneHotEncoder(
-                        handle_unknown="ignore",
-                        drop="first",
-                        sparse_output=False,
-                    ),
-                    ["payer_family"],
-                )
+        subset = (
+            df[
+                df[
+                    "payer_category"
+                ] == category
             ]
+            .copy()
+        )
+
+        features = [
+            "payer_family"
+        ]
+
+        X = subset[
+            features
+        ]
+
+        y = (
+            subset[
+                "log_price_ratio"
+            ]
+            .astype(np.float64)
+            .to_numpy()
+        )
+
+        groups = subset[
+            "msdrg_code"
+        ]
+
+        n_splits = min(
+            5,
+            groups.nunique(),
+        )
+
+        cv = GroupKFold(
+            n_splits=n_splits
+        )
+
+        # ----------------------------------------
+        # Ridge
+        # ----------------------------------------
+
+        ridge_preprocessing = (
+            ColumnTransformer(
+                transformers=[
+                    (
+                        "categorical",
+                        OneHotEncoder(
+                            handle_unknown="ignore",
+                            drop="first",
+                            sparse_output=False,
+                            dtype=np.float64,
+                        ),
+                        features,
+                    )
+                ]
+            )
         )
 
         ridge = Pipeline(
             steps=[
-                ("preprocessing", ridge_preprocessing),
-                ("model", Ridge(alpha=1.0)),
+                (
+                    "preprocessing",
+                    ridge_preprocessing,
+                ),
+                (
+                    "model",
+                    Ridge(
+                        alpha=1.0
+                    ),
+                ),
             ]
         )
 
-        ridge_predictions = cross_val_predict(
-            ridge,
-            X,
-            y,
-            cv=cv,
-            groups=groups,
+        ridge_predictions = (
+            cross_val_predict(
+                ridge,
+                X,
+                y,
+                cv=cv,
+                groups=groups,
+            )
+        )
+
+        validate_predictions(
+            ridge_predictions,
+            f"{category} Ridge",
         )
 
         ridge_r2 = r2_score(
@@ -266,28 +714,39 @@ def evaluate_by_payer_category(df):
             ridge_predictions,
         )
 
-        ridge_mae = mean_absolute_error(
-            y,
-            ridge_predictions,
+        ridge_mae = (
+            mean_absolute_error(
+                y,
+                ridge_predictions,
+            )
         )
 
+        # ----------------------------------------
         # Random Forest
-        rf_preprocessing = ColumnTransformer(
-            transformers=[
-                (
-                    "categorical",
-                    OneHotEncoder(
-                        handle_unknown="ignore",
-                        sparse_output=False,
-                    ),
-                    ["payer_family"],
-                )
-            ]
+        # ----------------------------------------
+
+        rf_preprocessing = (
+            ColumnTransformer(
+                transformers=[
+                    (
+                        "categorical",
+                        OneHotEncoder(
+                            handle_unknown="ignore",
+                            sparse_output=False,
+                            dtype=np.float64,
+                        ),
+                        features,
+                    )
+                ]
+            )
         )
 
         rf = Pipeline(
             steps=[
-                ("preprocessing", rf_preprocessing),
+                (
+                    "preprocessing",
+                    rf_preprocessing,
+                ),
                 (
                     "model",
                     RandomForestRegressor(
@@ -301,12 +760,19 @@ def evaluate_by_payer_category(df):
             ]
         )
 
-        rf_predictions = cross_val_predict(
-            rf,
-            X,
-            y,
-            cv=cv,
-            groups=groups,
+        rf_predictions = (
+            cross_val_predict(
+                rf,
+                X,
+                y,
+                cv=cv,
+                groups=groups,
+            )
+        )
+
+        validate_predictions(
+            rf_predictions,
+            f"{category} Random Forest",
         )
 
         rf_r2 = r2_score(
@@ -314,33 +780,82 @@ def evaluate_by_payer_category(df):
             rf_predictions,
         )
 
-        rf_mae = mean_absolute_error(
-            y,
-            rf_predictions,
+        rf_mae = (
+            mean_absolute_error(
+                y,
+                rf_predictions,
+            )
         )
 
-        print(f"\n{category}")
-        print("-" * len(category))
-        print(f"Rows: {len(subset):,}")
+        # ----------------------------------------
+        # Output
+        # ----------------------------------------
+
+        print(
+            f"\n{category}"
+        )
+
+        print(
+            "-" * len(category)
+        )
+
+        print(
+            f"Rows: "
+            f"{len(subset):,}"
+        )
+
         print(
             f"Unique MS-DRGs: "
             f"{subset['msdrg_code'].nunique():,}"
         )
 
-        print("\nRidge")
-        print(f"Grouped CV R²:  {ridge_r2:.4f}")
-        print(f"Grouped CV MAE: {ridge_mae:.4f}")
+        print(
+            "\nRidge"
+        )
 
-        print("\nRandom Forest")
-        print(f"Grouped CV R²:  {rf_r2:.4f}")
-        print(f"Grouped CV MAE: {rf_mae:.4f}")
+        print(
+            f"Grouped CV R²:  "
+            f"{ridge_r2:.4f}"
+        )
+
+        print(
+            f"Grouped CV MAE: "
+            f"{ridge_mae:.4f}"
+        )
+
+        print(
+            "\nRandom Forest"
+        )
+
+        print(
+            f"Grouped CV R²:  "
+            f"{rf_r2:.4f}"
+        )
+
+        print(
+            f"Grouped CV MAE: "
+            f"{rf_mae:.4f}"
+        )
+
 
 def main():
     df = load_data()
 
-    run_linear_model(df)
-    run_random_forest(df)
-    evaluate_by_payer_category(df)
+    run_ridge_model(
+        df
+    )
+
+    run_interaction_ridge(
+        df
+    )
+
+    run_random_forest(
+        df
+    )
+
+    evaluate_by_payer_category(
+        df
+    )
 
 
 if __name__ == "__main__":
