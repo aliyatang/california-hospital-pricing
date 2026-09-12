@@ -12,3 +12,4 @@ jupyter
 pytest
 rapidfuzz
 ijson
+scikit-learn
